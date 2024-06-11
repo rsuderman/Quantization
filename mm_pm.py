@@ -33,20 +33,20 @@ def quant_i8_per_tensor(A, offset=True):
         MIN = torch.min(A)
 
     RANGE = MAX - MIN
-    OFFSET = MIN
+    OFFSET = -MIN
     SCALE = 255.0 / RANGE
 
     SCALE = torch.full((A.shape[0],), SCALE)
     OFFSET = torch.full((A.shape[0],), OFFSET)
     OFFSET = OFFSET * SCALE
 
-    A = A * SCALE.unsqueeze(1) - OFFSET.unsqueeze(1)
+    A = A * SCALE.unsqueeze(1) + OFFSET.unsqueeze(1)
     A = torch.round(A)
     A = torch.clamp(A, 0, 255.0)
     A = A.to(torch.uint8)
 
     SCALE = 1.0 / SCALE
-    return A, SCALE, -OFFSET
+    return A, SCALE, OFFSET
 
 
 def quant_i8_per_channel(A,axis=1, offset=False):
@@ -57,15 +57,15 @@ def quant_i8_per_channel(A,axis=1, offset=False):
         MIN = torch.min(A, axis=axis).values
 
     SCALE = 255.0 / (MAX - MIN)
-    OFFSET = MIN * SCALE
-    A = A * SCALE.unsqueeze(axis) - OFFSET.unsqueeze(axis)
+    OFFSET = -MIN * SCALE
+    A = A * SCALE.unsqueeze(axis) + OFFSET.unsqueeze(axis)
     SCALE = 1.0 / SCALE
 
     A = torch.round(A)
     A = torch.clamp(A, 0, 255.0)
     A = A.to(torch.uint8)
 
-    return A, SCALE, -OFFSET
+    return A, SCALE, OFFSET
 
 
 def mmt_quant(A, B, per_tensor=False, offset=True):
