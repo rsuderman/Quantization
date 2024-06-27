@@ -67,7 +67,10 @@ def quantize_fp8(tensor):
 def iree_flash_attention(query, key, value, fake_fp8=False):
     config = ireert.Config("local-task")
     ctx = ireert.SystemContext(config=config)
-    with open("attention_f32.vmfb", 'rb') as f:
+
+    vmfb = "attention_fp8.vmfb" if fake_fp8 else "attention_f32.vmfb"
+
+    with open(vmfb, 'rb') as f:
         contents = f.read()
     vm_module = ireert.VmModule.from_buffer(ctx.instance, contents, warn_if_copy=False)
     ctx.add_vm_module(vm_module)
@@ -85,15 +88,17 @@ def iree_flash_attention(query, key, value, fake_fp8=False):
         vscale, value = quantize_fp8(value)
         kscale, key = quantize_fp8(key)
 
-        # We just quant - dequant the values to get an approximation:
-        query = query * qscale
-        key = key * kscale
-        value = value * vscale
+        qscale = torch.asarray(qscale).to(torch.float32)
+        vscale = torch.asarray(vscale).to(torch.float32)
+        kscale = torch.asarray(kscale).to(torch.float32)
 
     scale = 1.0 / math.sqrt(64)
-    scale = numpy.asarray(scale, dtype=numpy.single)
+    scale = torch.asarray(scale, dtype=torch.float32)
 
-    output = main(query, key, value, scale)
+    if fake_fp8:
+        output = main(query, key, value, scale, qscale, kscale, vscale)
+    else :
+        output = main(query, key, value, scale)
 
     output = output.reshape((batch, output.shape[-2], output.shape[-1]))
     output = torch.tensor(output)
@@ -192,7 +197,7 @@ def evaluate(f, o, *args, **kwargs):
     res = f(*args, **kwargs)
     mx, serr = compute_error(res, o)
     range = (torch.min(res).item(), torch.max(res).item())
-    print(f.__name__, q.dtype)
+    print(f.__name__, kwargs)
     print(" max err ", mx)
     print(" sq err  ", serr)
     print(" range   ", range)
