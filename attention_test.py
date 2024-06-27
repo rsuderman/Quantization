@@ -1,6 +1,9 @@
+import functools
 import math
 import numpy
 import torch
+
+import iree.runtime as ireert
 
 folder = "/media/rsuderman/Disk2/Models/SDXL/test_inputs"
 
@@ -29,7 +32,7 @@ k_fp8 = truncate_f8(k)
 v_fp8 = truncate_f8(v)
 o_fp8 = truncate_f8(o)
 
-def builtin_attention(q,k,v, a):
+def builtin_attention(q, k, v, a=None):
     o = torch.nn.functional.scaled_dot_product_attention(q, k, v, attn_mask=a, dropout_p=0.0, is_causal=False)
     return o
 
@@ -54,11 +57,58 @@ def decomposed_attention(query, key, value, attn_mask=None, dropout_p=0.0, is_ca
     attn_weight = torch.dropout(attn_weight, dropout_p, train=True)
     return attn_weight @ value
 
-def flash_attention(query, key, value, attention):
+def quantize_fp8(tensor):
+    scale = torch.max(torch.abs(tensor)).item() / fp8_max
+    tensor = tensor / scale
+    tensor = torch.clamp(tensor, -fp8_max, fp8_max)
+    tensor = tensor.to(fp8_dtype)
+    return scale, tensor.to(torch.float32)
+
+def iree_flash_attention(query, key, value, fake_fp8=False):
+    config = ireert.Config("local-task")
+    ctx = ireert.SystemContext(config=config)
+    with open("attention_f32.vmfb", 'rb') as f:
+        contents = f.read()
+    vm_module = ireert.VmModule.from_buffer(ctx.instance, contents, warn_if_copy=False)
+    ctx.add_vm_module(vm_module)
+    main = ctx.modules.module["main"]
+
+    batchdims = query.shape[:-2]
+    batch = functools.reduce(lambda x, y : x * y, batchdims, 1)
+
+    query = query.reshape((batch, query.shape[-2], query.shape[-1])).to(torch.float32)
+    key = key.reshape((batch, key.shape[-2], key.shape[-1])).to(torch.float32)
+    value = value.reshape((batch, value.shape[-2], value.shape[-1])).to(torch.float32)
+
+    if fake_fp8:
+        qscale, query = quantize_fp8(query)
+        vscale, value = quantize_fp8(value)
+        kscale, key = quantize_fp8(key)
+
+        # We just quant - dequant the values to get an approximation:
+        query = query * qscale
+        key = key * kscale
+        value = value * vscale
+
+    scale = 1.0 / math.sqrt(64)
+    scale = numpy.asarray(scale, dtype=numpy.single)
+
+    output = main(query, key, value, scale)
+
+    output = output.reshape((batch, output.shape[-2], output.shape[-1]))
+    output = torch.tensor(output)
+    return output
+    
+def flash_attention(query, key, value, fp8=False):
     BLOCK_M = 64
     BLOCK_K = 64
     seq_len = query.shape[-2]
     HIDDEN = query.shape[-1]
+
+    if fp8:
+        query_scale, query = quantize_fp8(query)
+        key_scale, key = quantize_fp8(key)
+        value_scale, value = quantize_fp8(value)
 
     init = torch.ones(*query.shape[:-1], value.shape[-1])
 
@@ -87,6 +137,10 @@ def flash_attention(query, key, value, attention):
                     qkT = torch.matmul(q, kT) 
                     qkT = qkT / math.sqrt(float(HIDDEN))
 
+                    if fp8:
+                        qkT = qkT * query_scale
+                        qkT = qkT * key_scale
+
                     old_max = max_stat
                     old_sum = sum_stat
 
@@ -101,11 +155,19 @@ def flash_attention(query, key, value, attention):
                     partial_softmax = torch.exp(qkT - broadcasted_max)
                     new_sum = torch.sum(partial_softmax, dim=1) + scaled_old_sum
 
-                    acc = torch.matmul(partial_softmax, v) + acc
+                    if fp8:
+                        partial_softmax_scale, partial_softmax = quantize_fp8(partial_softmax)
+                        acc = torch.matmul(partial_softmax, v) * partial_softmax_scale + acc
+                    else:
+                        acc = torch.matmul(partial_softmax, v) + acc
+
                     sum_stat = new_sum
                     max_stat = new_max
 
                 acc = acc / sum_stat.unsqueeze(1)
+                
+                if fp8:
+                    acc = acc * value_scale
 
                 start = i * BLOCK_K
                 end = start + BLOCK_K
@@ -126,9 +188,8 @@ def compute_error(lhs, rhs):
     return mxerr.item(), sserr.item()
 
 
-def evaluate(f, q, k, v, a, o):
-    res = f(q, k, v, a)
-    print(res[0, 0, :4, :4])
+def evaluate(f, o, *args, **kwargs):
+    res = f(*args, **kwargs)
     mx, serr = compute_error(res, o)
     range = (torch.min(res).item(), torch.max(res).item())
     print(f.__name__, q.dtype)
@@ -141,8 +202,8 @@ k = k[:1, :1, :, :]
 v = v[:1, :1, :, :]
 o = o[:1, :1, :, :]
 
-print(o[0, 0, :4, :4])
-
-evaluate(builtin_attention, q, k, v, a, o)
-# evaluate(builtin_attention, q_fp8, k_fp8, v_fp8, a, o_fp8)
-evaluate(flash_attention, q, k, v, a, o)
+# evaluate(builtin_attention, o, q, k, v)
+evaluate(flash_attention, o, q, k, v)
+# evaluate(flash_attention, o, q, k, v, fp8=True)
+evaluate(iree_flash_attention, o, q, k, v)
+evaluate(iree_flash_attention, o, q, k, v, fake_fp8=True)
