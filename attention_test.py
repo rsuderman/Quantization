@@ -5,7 +5,7 @@ import torch
 
 import iree.runtime as ireert
 
-folder = "/media/rsuderman/Disk2/Models/SDXL/test_inputs"
+folder = "data"
 
 a = None
 
@@ -57,8 +57,9 @@ def decomposed_attention(query, key, value, attn_mask=None, dropout_p=0.0, is_ca
     attn_weight = torch.dropout(attn_weight, dropout_p, train=True)
     return attn_weight @ value
 
-def quantize_fp8(tensor):
-    scale = torch.max(torch.abs(tensor)).item() / fp8_max
+def quantize_fp8(tensor, scale=None):
+    if scale is None:
+        scale = torch.max(torch.abs(tensor)).item() / fp8_max
     tensor = tensor / scale
     tensor = torch.clamp(tensor, -fp8_max, fp8_max)
     tensor = tensor.to(fp8_dtype)
@@ -209,6 +210,6 @@ o = o[:1, :1, :, :]
 
 # evaluate(builtin_attention, o, q, k, v)
 evaluate(flash_attention, o, q, k, v)
-# evaluate(flash_attention, o, q, k, v, fp8=True)
+evaluate(flash_attention, o, q, k, v, fp8=True)
 evaluate(iree_flash_attention, o, q, k, v)
 evaluate(iree_flash_attention, o, q, k, v, fake_fp8=True)
