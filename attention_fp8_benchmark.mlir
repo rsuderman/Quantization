@@ -17,18 +17,18 @@ func.func private @scale(%arg0 : tensor<1x4096x64xf32>, %arg1 : f32) -> tensor<1
 }
 
 func.func @main(
-    %q : tensor<1x4096x64xf32>,
-    %k : tensor<1x4096x64xf32>,
-    %v : tensor<1x4096x64xf32>) -> tensor<1x4096x64xf32> {
+    %q : tensor<1x4096x64xi8>,
+    %k : tensor<1x4096x64xi8>,
+    %v : tensor<1x4096x64xi8>) -> tensor<1x4096x64xf32> {
 
     %scalef32  = arith.constant 1.0 : f32
     %qscalef32 = arith.constant 1.0 : f32
     %kscalef32 = arith.constant 1.0 : f32
     %vscalef32 = arith.constant 1.0 : f32
 
-    %qf8 = arith.truncf %q : tensor<1x4096x64xf32> to tensor<1x4096x64xf8E4M3FNUZ>
-    %kf8 = arith.truncf %k : tensor<1x4096x64xf32> to tensor<1x4096x64xf8E4M3FNUZ>
-    %vf8 = arith.truncf %v : tensor<1x4096x64xf32> to tensor<1x4096x64xf8E4M3FNUZ>
+    %qf8 = arith.bitcast %q : tensor<1x4096x64xi8> to tensor<1x4096x64xf8E4M3FNUZ>
+    %kf8 = arith.bitcast %k : tensor<1x4096x64xi8> to tensor<1x4096x64xf8E4M3FNUZ>
+    %vf8 = arith.bitcast %v : tensor<1x4096x64xi8> to tensor<1x4096x64xf8E4M3FNUZ>
 
     %qk = arith.mulf %qscalef32, %kscalef32 : f32
     %qks = arith.mulf %qk, %scalef32 : f32

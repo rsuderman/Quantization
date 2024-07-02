@@ -14,6 +14,11 @@ k = torch.tensor(numpy.load(f"{folder}/k.numpy"))
 v = torch.tensor(numpy.load(f"{folder}/v.numpy"))
 o = torch.tensor(numpy.load(f"{folder}/o.numpy"))
 
+q = q[:1, 0, :, :]
+k = k[:1, 0, :, :]
+v = v[:1, 0, :, :]
+o = o[:1, 0, :, :]
+
 fp8_dtype = torch.float8_e4m3fn
 fp8_max = torch.finfo(fp8_dtype).max
 
@@ -31,6 +36,29 @@ q_fp8 = truncate_f8(q)
 k_fp8 = truncate_f8(k)
 v_fp8 = truncate_f8(v)
 o_fp8 = truncate_f8(o)
+
+def quantize_fp8(tensor, scale=None):
+    if scale is None:
+        scale = torch.max(torch.abs(tensor)).item() / fp8_max
+    tensor = tensor / scale
+    tensor = torch.clamp(tensor, -fp8_max, fp8_max)
+    tensor = tensor.to(fp8_dtype)
+    return scale, tensor.to(torch.float32)
+
+def save_fp8(tensor, tname, sname):
+    scale, tensor = quantize_fp8(tensor)
+    scale = numpy.asarray(scale, dtype=numpy.single)
+    tensor = numpy.asarray(tensor, dtype=numpy.single)
+    numpy.save(tname, tensor)
+    numpy.save(sname, scale)
+
+if False:
+    save_fp8(q, "data/fp8/q", "data/fp8/qscale")
+    save_fp8(k, "data/fp8/k", "data/fp8/kscale")
+    save_fp8(v, "data/fp8/v", "data/fp8/vscale")
+    scale = numpy.asarray(1.0 / math.sqrt(64), dtype=numpy.single)
+    numpy.save("data/fp8/scale", scale)
+    numpy.save("data/fp8/o", o)
 
 def builtin_attention(q, k, v, a=None):
     o = torch.nn.functional.scaled_dot_product_attention(q, k, v, attn_mask=a, dropout_p=0.0, is_causal=False)
@@ -57,19 +85,11 @@ def decomposed_attention(query, key, value, attn_mask=None, dropout_p=0.0, is_ca
     attn_weight = torch.dropout(attn_weight, dropout_p, train=True)
     return attn_weight @ value
 
-def quantize_fp8(tensor, scale=None):
-    if scale is None:
-        scale = torch.max(torch.abs(tensor)).item() / fp8_max
-    tensor = tensor / scale
-    tensor = torch.clamp(tensor, -fp8_max, fp8_max)
-    tensor = tensor.to(fp8_dtype)
-    return scale, tensor.to(torch.float32)
-
 def iree_flash_attention(query, key, value, fake_fp8=False):
     config = ireert.Config("local-task")
     ctx = ireert.SystemContext(config=config)
 
-    vmfb = "attention_fp8.vmfb" if fake_fp8 else "attention_f32.vmfb"
+    vmfb = "attention_fp32.vmfb" if fake_fp8 else "attention_f32.vmfb"
 
     with open(vmfb, 'rb') as f:
         contents = f.read()
@@ -203,13 +223,8 @@ def evaluate(f, o, *args, **kwargs):
     print(" sq err  ", serr)
     print(" range   ", range)
 
-q = q[:1, :1, :, :]
-k = k[:1, :1, :, :]
-v = v[:1, :1, :, :]
-o = o[:1, :1, :, :]
-
 # evaluate(builtin_attention, o, q, k, v)
-evaluate(flash_attention, o, q, k, v)
-evaluate(flash_attention, o, q, k, v, fp8=True)
-evaluate(iree_flash_attention, o, q, k, v)
-evaluate(iree_flash_attention, o, q, k, v, fake_fp8=True)
+# evaluate(flash_attention, o, q, k, v)
+# evaluate(flash_attention, o, q, k, v, fp8=True)
+# evaluate(iree_flash_attention, o, q, k, v)
+# evaluate(iree_flash_attention, o, q, k, v, fake_fp8=True)
