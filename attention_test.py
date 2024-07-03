@@ -19,7 +19,7 @@ k = k[:1, 0, :, :]
 v = v[:1, 0, :, :]
 o = o[:1, 0, :, :]
 
-fp8_dtype = torch.float8_e4m3fn
+fp8_dtype = torch.float8_e4m3fnuz
 fp8_max = torch.finfo(fp8_dtype).max
 
 def truncate_f8(f):
@@ -35,7 +35,6 @@ def truncate_f8(f):
 q_fp8 = truncate_f8(q)
 k_fp8 = truncate_f8(k)
 v_fp8 = truncate_f8(v)
-o_fp8 = truncate_f8(o)
 
 def quantize_fp8(tensor, scale=None):
     if scale is None:
@@ -52,7 +51,7 @@ def save_fp8(tensor, tname, sname):
     numpy.save(tname, tensor)
     numpy.save(sname, scale)
 
-if False:
+if True:
     save_fp8(q, "data/fp8/q", "data/fp8/qscale")
     save_fp8(k, "data/fp8/k", "data/fp8/kscale")
     save_fp8(v, "data/fp8/v", "data/fp8/vscale")

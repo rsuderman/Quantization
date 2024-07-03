@@ -30,19 +30,21 @@ func.func @main(
     %kscalef32 = tensor.extract %kscale[] : tensor<f32>
     %vscalef32 = tensor.extract %vscale[] : tensor<f32>
 
-
-
-
+    %qf8 = arith.truncf %q : tensor<1x4096x64xf32> to tensor<1x4096x64xf16>
+    %kf8 = arith.truncf %k : tensor<1x4096x64xf32> to tensor<1x4096x64xf16>
+    %vf8 = arith.truncf %v : tensor<1x4096x64xf32> to tensor<1x4096x64xf16>
 
     %qk = arith.mulf %qscalef32, %kscalef32 : f32
     %qks = arith.mulf %qk, %scalef32 : f32
 
-    %empty = tensor.empty() : tensor<1x4096x64xf32>
-    %c0 = arith.constant 0.0 : f32
-    %fill = linalg.fill ins(%c0 : f32) outs(%empty : tensor<1x4096x64xf32>)  -> tensor<1x4096x64xf32>
-    %atten = iree_linalg_ext.attention ins(%q, %k, %v, %qks : tensor<1x4096x64xf32>, tensor<1x4096x64xf32>, tensor<1x4096x64xf32>, f32) outs(%fill : tensor<1x4096x64xf32>) -> tensor<1x4096x64xf32>
+    %empty = tensor.empty() : tensor<1x4096x64xf16>
+    %c0 = arith.constant 0.0 : f16
+    %fill = linalg.fill ins(%c0 : f16) outs(%empty : tensor<1x4096x64xf16>)  -> tensor<1x4096x64xf16>
+    %atten = iree_linalg_ext.attention ins(%qf8, %kf8, %vf8, %qks : tensor<1x4096x64xf16>, tensor<1x4096x64xf16>, tensor<1x4096x64xf16>, f32) outs(%fill : tensor<1x4096x64xf16>) -> tensor<1x4096x64xf16>
 
-    %atten_scale = call @scale(%atten, %vscalef32) : (tensor<1x4096x64xf32>, f32) -> tensor<1x4096x64xf32>
+    %attenf32 = arith.extf %atten : tensor<1x4096x64xf16> to tensor<1x4096x64xf32>
+
+    %atten_scale = call @scale(%attenf32, %vscalef32) : (tensor<1x4096x64xf32>, f32) -> tensor<1x4096x64xf32>
 
     return %atten_scale : tensor<1x4096x64xf32>
 }
