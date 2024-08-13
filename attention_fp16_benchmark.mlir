@@ -36,5 +36,5 @@ func.func @main(
 
     %atten_scale = call @scale(%atten, %vscalef16) : (tensor<20x4096x64xf16>, f16) -> tensor<20x4096x64xf16>
 
-    return %atten_scale : tensor<20x4096x64xf16>
+    return %atten : tensor<20x4096x64xf16>
 }

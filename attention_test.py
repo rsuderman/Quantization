@@ -88,7 +88,7 @@ def iree_flash_attention(query, key, value, fake_fp8=False):
     config = ireert.Config("local-task")
     ctx = ireert.SystemContext(config=config)
 
-    vmfb = "attention_fp32.vmfb" if fake_fp8 else "attention_f32.vmfb"
+    vmfb = "vmfb/attention_fp32.vmfb" if fake_fp8 else "vmfb/attention_f32.vmfb"
 
     with open(vmfb, 'rb') as f:
         contents = f.read()
@@ -99,9 +99,9 @@ def iree_flash_attention(query, key, value, fake_fp8=False):
     batchdims = query.shape[:-2]
     batch = functools.reduce(lambda x, y : x * y, batchdims, 1)
 
-    query = query.reshape((batch, query.shape[-2], query.shape[-1])).to(torch.float32)
-    key = key.reshape((batch, key.shape[-2], key.shape[-1])).to(torch.float32)
-    value = value.reshape((batch, value.shape[-2], value.shape[-1])).to(torch.float32)
+    query = query.reshape((1, batch, query.shape[-2], query.shape[-1])).to(torch.float32)
+    key = key.reshape((1, batch, key.shape[-2], key.shape[-1])).to(torch.float32)
+    value = value.reshape((1, batch, value.shape[-2], value.shape[-1])).to(torch.float32)
 
     if fake_fp8:
         qscale, query = quantize_fp8(query)
@@ -120,7 +120,7 @@ def iree_flash_attention(query, key, value, fake_fp8=False):
     else :
         output = main(query, key, value, scale)
 
-    output = output.reshape((batch, output.shape[-2], output.shape[-1]))
+    output = output.reshape((1, batch, output.shape[-2], output.shape[-1]))
     output = torch.tensor(output)
     return output
     
@@ -225,5 +225,11 @@ def evaluate(f, o, *args, **kwargs):
 # evaluate(builtin_attention, o, q, k, v)
 # evaluate(flash_attention, o, q, k, v)
 # evaluate(flash_attention, o, q, k, v, fp8=True)
+
+o = o.unsqueeze(0)
+q = q.unsqueeze(0)
+k = k.unsqueeze(0)
+v = v.unsqueeze(0)
+
 # evaluate(iree_flash_attention, o, q, k, v)
-# evaluate(iree_flash_attention, o, q, k, v, fake_fp8=True)
+evaluate(iree_flash_attention, o, q, k, v, fake_fp8=True)
